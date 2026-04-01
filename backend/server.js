@@ -43,46 +43,44 @@ if (useCluster && cluster.isMaster) {
     if (!admin.apps.length) {
       console.log(`${logPrefix}Initializing Firebase Admin...`);
       
-      let firebaseCredential;
+      let serviceAccount;
       const serviceAccountPath = path.join(__dirname, 'serviceAccountKey.json');
 
       if (fs.existsSync(serviceAccountPath)) {
         console.log(`${logPrefix}Loading Firebase from serviceAccountKey.json`);
-        firebaseCredential = admin.credential.cert(serviceAccountPath);
+        serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
       } else {
         console.log(`${logPrefix}Loading Firebase from Environment Variables`);
-        
-        const projectId = process.env.FIREBASE_PROJECT_ID;
-        const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-        let privateKey = process.env.FIREBASE_PRIVATE_KEY;
-
-        if (!projectId || !clientEmail || !privateKey) {
-          throw new Error('Missing Firebase Admin credentials. Set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY.');
-        }
-
-        // --- Robust PEM Normalization ---
-        privateKey = privateKey.trim();
-        // Remove literal quotes
-        if ((privateKey.startsWith('"') && privateKey.endsWith('"')) ||
-            (privateKey.startsWith("'") && privateKey.endsWith("'"))) {
-          privateKey = privateKey.slice(1, -1);
-        }
-        // Replace literal \n with real newlines and strip NULL characters
-        privateKey = privateKey.replace(/\\n/g, '\n').replace(/\0/g, '');
-        
-        if (!privateKey.includes('-----BEGIN')) {
-          throw new Error("Private Key must contain PEM markers like -----BEGIN PRIVATE KEY-----");
-        }
-
-        firebaseCredential = admin.credential.cert({
-          projectId,
-          clientEmail,
-          privateKey,
-        });
+        serviceAccount = {
+          projectId: process.env.FIREBASE_PROJECT_ID,
+          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+          privateKey: process.env.FIREBASE_PRIVATE_KEY
+        };
       }
 
+      // Robust check for required fields
+      if (!serviceAccount.projectId || !serviceAccount.clientEmail || !serviceAccount.privateKey) {
+        throw new Error('Missing Firebase Admin credentials. Please check serviceAccountKey.json or Environment Variables.');
+      }
+
+      // --- Robust PEM Normalization ---
+      let privateKey = serviceAccount.privateKey.trim();
+      // Remove literal quotes
+      if ((privateKey.startsWith('"') && privateKey.endsWith('"')) ||
+          (privateKey.startsWith("'") && privateKey.endsWith("'"))) {
+        privateKey = privateKey.slice(1, -1);
+      }
+      // Replace literal \n and strip NULL bytes
+      privateKey = privateKey.replace(/\\n/g, '\n').replace(/\0/g, '');
+      
+      if (!privateKey.includes('-----BEGIN')) {
+        throw new Error("Private Key must contain PEM markers like -----BEGIN PRIVATE KEY-----");
+      }
+
+      serviceAccount.privateKey = privateKey;
+
       admin.initializeApp({
-        credential: firebaseCredential,
+        credential: admin.credential.cert(serviceAccount),
       });
       console.log(`${logPrefix}Firebase Admin initialized successfully.`);
     }
