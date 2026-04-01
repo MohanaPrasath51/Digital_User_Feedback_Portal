@@ -1,18 +1,17 @@
+// 0. Load environment variables before anything else
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '.env') });
+
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
-const dotenv = require('dotenv');
 const admin = require('firebase-admin');
 const connectDB = require('./config/db');
 const ensureAdminUser = require('./config/seedAdmin');
 const cluster = require('cluster');
 const os = require('os');
 const fs = require('fs');
-const path = require('path');
-
-// Load environment variables
-dotenv.config();
 
 const PORT = process.env.PORT || 5000;
 
@@ -40,57 +39,28 @@ if (useCluster && cluster.isMaster) {
 
   const initializeApp = async () => {
     // 1. Initialize Firebase Admin SDK
+    // 1. Initialize Firebase Admin SDK
     if (!admin.apps.length) {
       console.log(`${logPrefix}Initializing Firebase Admin...`);
       
-      let serviceAccount;
-      const serviceAccountPath = path.join(__dirname, 'serviceAccountKey.json');
-
-      if (fs.existsSync(serviceAccountPath)) {
-        console.log(`${logPrefix}Loading Firebase from serviceAccountKey.json`);
-        const rawJson = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
-        
-        // Map snake_case (JSON file) to camelCase
-        serviceAccount = {
-          projectId: rawJson.project_id || rawJson.projectId,
-          clientEmail: rawJson.client_email || rawJson.clientEmail,
-          privateKey: rawJson.private_key || rawJson.privateKey
-        };
-      } else {
-        console.log(`${logPrefix}Loading Firebase from Environment Variables`);
-        serviceAccount = {
-          projectId: process.env.FIREBASE_PROJECT_ID,
-          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-          privateKey: process.env.FIREBASE_PRIVATE_KEY
-        };
-      }
-
-      // Robust check for required fields
-      if (!serviceAccount.projectId || !serviceAccount.clientEmail || !serviceAccount.privateKey) {
-        console.log(`${logPrefix}Diagnostic - ProjectId: ${!!serviceAccount.projectId}, Email: ${!!serviceAccount.clientEmail}, Key: ${!!serviceAccount.privateKey}`);
-        throw new Error('Missing Firebase Admin credentials. Please check serviceAccountKey.json or Environment Variables.');
-      }
-
-      // --- Robust PEM Normalization ---
-      let privateKey = serviceAccount.privateKey.trim();
-      // Remove literal quotes
-      if ((privateKey.startsWith('"') && privateKey.endsWith('"')) ||
-          (privateKey.startsWith("'") && privateKey.endsWith("'"))) {
-        privateKey = privateKey.slice(1, -1);
-      }
-      // Replace literal \n and strip NULL bytes
-      privateKey = privateKey.replace(/\\n/g, '\n').replace(/\0/g, '');
+      const base64ServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT;
       
-      if (!privateKey.includes('-----BEGIN')) {
-        throw new Error("Private Key must contain PEM markers like -----BEGIN PRIVATE KEY-----");
+      if (!base64ServiceAccount) {
+        throw new Error('Missing FIREBASE_SERVICE_ACCOUNT in environment variables.');
       }
 
-      serviceAccount.privateKey = privateKey;
-
-      admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount),
-      });
-      console.log(`${logPrefix}Firebase Admin initialized successfully.`);
+      try {
+        const serviceAccount = JSON.parse(
+          Buffer.from(base64ServiceAccount, "base64").toString("utf-8")
+        );
+        
+        admin.initializeApp({
+          credential: admin.credential.cert(serviceAccount),
+        });
+        console.log(`${logPrefix}Firebase Admin initialized successfully.`);
+      } catch (error) {
+        throw new Error(`Failed to parse FIREBASE_SERVICE_ACCOUNT: ${error.message}`);
+      }
     }
 
     // 3. Connect to Database (MongoDB)
