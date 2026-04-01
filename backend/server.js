@@ -54,14 +54,25 @@ if (useCluster && cluster.isMaster) {
 
       function normalizePrivateKey(rawKey) {
         if (!rawKey) return rawKey;
-        // Strip literal quotes if present
+        
         let normalized = rawKey.trim();
+        // Strip out literal quotes if present (some .env files have them)
         if ((normalized.startsWith('"') && normalized.endsWith('"')) ||
-          (normalized.startsWith("'") && normalized.endsWith("'"))) {
+            (normalized.startsWith("'") && normalized.endsWith("'"))) {
           normalized = normalized.slice(1, -1);
         }
-        // Replace literal \n or \\n characters with real newlines
-        return normalized.replace(/\\n/g, '\n');
+
+        // Replace literal string "\n" or "\\n" with REAL newline characters.
+        // This is where most PEM format issues occur!
+        normalized = normalized.replace(/\\n/g, '\n');
+
+        // Self-Correction: If the key was already correct, don't break it. 
+        // But ensure it looks like a PEM.
+        if (!normalized.includes('-----BEGIN')) {
+           throw new Error("Private Key must contain PEM markers like -----BEGIN PRIVATE KEY-----");
+        }
+        
+        return normalized;
       }
 
       const firebasePrivateKey = normalizePrivateKey(rawFirebasePrivateKey);
