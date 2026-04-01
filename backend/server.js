@@ -48,7 +48,14 @@ if (useCluster && cluster.isMaster) {
 
       if (fs.existsSync(serviceAccountPath)) {
         console.log(`${logPrefix}Loading Firebase from serviceAccountKey.json`);
-        serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
+        const rawJson = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
+        
+        // Map snake_case (JSON file) to camelCase
+        serviceAccount = {
+          projectId: rawJson.project_id || rawJson.projectId,
+          clientEmail: rawJson.client_email || rawJson.clientEmail,
+          privateKey: rawJson.private_key || rawJson.privateKey
+        };
       } else {
         console.log(`${logPrefix}Loading Firebase from Environment Variables`);
         serviceAccount = {
@@ -60,6 +67,7 @@ if (useCluster && cluster.isMaster) {
 
       // Robust check for required fields
       if (!serviceAccount.projectId || !serviceAccount.clientEmail || !serviceAccount.privateKey) {
+        console.log(`${logPrefix}Diagnostic - ProjectId: ${!!serviceAccount.projectId}, Email: ${!!serviceAccount.clientEmail}, Key: ${!!serviceAccount.privateKey}`);
         throw new Error('Missing Firebase Admin credentials. Please check serviceAccountKey.json or Environment Variables.');
       }
 
@@ -166,6 +174,13 @@ if (useCluster && cluster.isMaster) {
 
     server.listen(PORT, () => {
       console.log(`${logPrefix}Server running on port ${PORT}`);
+    }).on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        console.error(`${logPrefix}Error: Port ${PORT} is already in use. Please kill the process running on this port or use a different port.`);
+        process.exit(1);
+      } else {
+        console.error(`${logPrefix}Server error:`, err.message);
+      }
     });
   };
 
