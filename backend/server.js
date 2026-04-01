@@ -39,59 +39,53 @@ if (useCluster && cluster.isMaster) {
   const logPrefix = cluster.isWorker ? `[Worker ${cluster.worker.id}] ` : '';
 
   const initializeApp = async () => {
-    // 1. Load Firebase Credentials
-    let firebaseCredential;
-    const serviceAccountPath = path.join(__dirname, 'serviceAccountKey.json');
+    // 1. Initialize Firebase Admin SDK
+    if (!admin.apps.length) {
+      console.log(`${logPrefix}Initializing Firebase Admin...`);
+      
+      let firebaseCredential;
+      const serviceAccountPath = path.join(__dirname, 'serviceAccountKey.json');
 
-    if (fs.existsSync(serviceAccountPath)) {
-      console.log(`${logPrefix}Loading Firebase from serviceAccountKey.json`);
-      firebaseCredential = admin.credential.cert(serviceAccountPath);
-    } else {
-      console.log(`${logPrefix}Loading Firebase from Environment Variables`);
-      const firebaseProjectId = process.env.FIREBASE_PROJECT_ID;
-      const firebaseClientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-      const rawFirebasePrivateKey = process.env.FIREBASE_PRIVATE_KEY;
-
-      function normalizePrivateKey(rawKey) {
-        if (!rawKey) return rawKey;
+      if (fs.existsSync(serviceAccountPath)) {
+        console.log(`${logPrefix}Loading Firebase from serviceAccountKey.json`);
+        firebaseCredential = admin.credential.cert(serviceAccountPath);
+      } else {
+        console.log(`${logPrefix}Loading Firebase from Environment Variables`);
         
-        let normalized = rawKey.trim();
-        // Strip out literal quotes if present (some .env files have them)
-        if ((normalized.startsWith('"') && normalized.endsWith('"')) ||
-            (normalized.startsWith("'") && normalized.endsWith("'"))) {
-          normalized = normalized.slice(1, -1);
+        const projectId = process.env.FIREBASE_PROJECT_ID;
+        const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+        let privateKey = process.env.FIREBASE_PRIVATE_KEY;
+
+        if (!projectId || !clientEmail || !privateKey) {
+          throw new Error('Missing Firebase Admin credentials. Set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY.');
         }
 
-        // Replace literal string "\n" or "\\n" with REAL newline characters.
-        // This is where most PEM format issues occur!
-        normalized = normalized.replace(/\\n/g, '\n');
-
-        // Self-Correction: If the key was already correct, don't break it. 
-        // But ensure it looks like a PEM.
-        if (!normalized.includes('-----BEGIN')) {
-           throw new Error("Private Key must contain PEM markers like -----BEGIN PRIVATE KEY-----");
+        // --- Robust PEM Normalization ---
+        privateKey = privateKey.trim();
+        // Remove literal quotes
+        if ((privateKey.startsWith('"') && privateKey.endsWith('"')) ||
+            (privateKey.startsWith("'") && privateKey.endsWith("'"))) {
+          privateKey = privateKey.slice(1, -1);
         }
+        // Replace literal \n with real newlines and strip NULL characters
+        privateKey = privateKey.replace(/\\n/g, '\n').replace(/\0/g, '');
         
-        return normalized;
+        if (!privateKey.includes('-----BEGIN')) {
+          throw new Error("Private Key must contain PEM markers like -----BEGIN PRIVATE KEY-----");
+        }
+
+        firebaseCredential = admin.credential.cert({
+          projectId,
+          clientEmail,
+          privateKey,
+        });
       }
 
-      const firebasePrivateKey = normalizePrivateKey(rawFirebasePrivateKey);
-
-      if (!firebaseProjectId || !firebaseClientEmail || !firebasePrivateKey) {
-        throw new Error('Missing Firebase Admin credentials. Set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY in backend/.env.');
-      }
-
-      firebaseCredential = admin.credential.cert({
-        projectId: firebaseProjectId,
-        clientEmail: firebaseClientEmail,
-        privateKey: firebasePrivateKey,
+      admin.initializeApp({
+        credential: firebaseCredential,
       });
+      console.log(`${logPrefix}Firebase Admin initialized successfully.`);
     }
-
-    // 2. Initialize Firebase
-    admin.initializeApp({
-      credential: firebaseCredential,
-    });
 
     // 3. Connect to Database (MongoDB)
     await connectDB();
@@ -115,7 +109,7 @@ if (useCluster && cluster.isMaster) {
       },
       credentials: true
     };
-    
+
     // 4. Initialize Express App & Socket.io
     const app = express();
     const server = http.createServer(app);
@@ -126,7 +120,7 @@ if (useCluster && cluster.isMaster) {
     io.on('connection', (socket) => {
       socket.on('join_feedback', (feedbackId) => socket.join(feedbackId));
       socket.on('leave_feedback', (feedbackId) => socket.leave(feedbackId));
-      
+
       // Typing Indicators logic
       socket.on('typing', ({ feedbackId, userName, role }) => {
         socket.to(feedbackId).emit('user_typing', { userId: socket.id, userName, role });
